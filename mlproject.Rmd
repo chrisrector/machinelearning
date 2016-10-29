@@ -1,0 +1,76 @@
+---
+title: "Coursera Practical Machine Learning Project"
+author: "Chris Rector"
+date: "October 22, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Synopsis
+
+This data analysis was done as the class project for the Johns Hopkins Practical Machine Learning course on Coursera. In this report we analyze data from fitness trackers worn by several participants who performed various excercises. For each excercise a series of measurements were recorded as well as an assessment of whether the individual performed the exercise correctly. This assessment is captured in the "classe" variable in the dataset.
+
+We use this data to build a model that will then be used to make predictions of whether or not an excercise was performed correctly based on the various measurements.
+
+
+```{r libraries, echo=TRUE, message=FALSE, warning=FALSE}
+library(caret)
+library(randomForest)
+
+```
+
+# Data processing
+
+The data comes already split into training and test sets. We decided to take training set and split it into a training and test set to allow us to build and test a model within the 
+
+
+```{r setup, echo=FALSE}
+
+train_csv = "pml-training.csv"
+test_csv = "pml-testing.csv"
+set.seed(3921837)
+
+all_training <- read.csv(train_csv)
+final_testing <- read.csv(test_csv)
+
+all_training[is.na(init_training)] <- 0
+
+inTrain <- createDataPartition(y=all_training$classe,
+                               p=0.75, list=FALSE)
+
+training <- all_training[inTrain,]
+testing <- all_training[-inTrain,]
+
+nzv_cols <- nearZeroVar(training)
+training_trim <- training[, -nzv_cols]
+
+x <- training_trim[sample(nrow(training_trim), 100),]
+x <- subset(x, select=-c(cvtd_timestamp))
+
+```
+
+Trying out some models...
+
+```{r explore, echo=FALSE}}
+
+modTreeBoot5 <- train(classe ~., method="rpart", data=x, trControl=trainControl(method = "boot", number = 5))
+max(modTreeBoot5$results[,"Accuracy"])
+
+modTreeCv5 <- train(classe ~., method="rpart", data=x, trControl=trainControl(method = "cv", number = 5))
+max(modTreeCv5$results[,"Accuracy"])
+
+modGbmBoot5 <- train(classe ~., method="gbm", data=x, verbose=FALSE,
+                    trControl=trainControl(method = "boot", number = 5))
+max(modGbmBoot5$results[,"Accuracy"])
+
+modForestCv5 <- train(classe ~., method="rf", data=x, verbose=FALSE,
+                      trControl=trainControl(method = "cv", number = 5))
+max(modForestCv5$results[,"Accuracy"])
+
+
+```
+
+
