@@ -1,0 +1,123 @@
+---
+title: "Coursera Practical Machine Learning Project"
+author: "Chris Rector"
+date: "October 22, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Synopsis
+
+This data analysis was done as the class project for the Johns Hopkins Practical Machine Learning course on Coursera. In this report we analyze data from fitness trackers worn by several participants who performed various excercises. For each excercise a series of measurements were recorded as well as an assessment of whether the individual performed the exercise correctly. This assessment is captured in the "classe" variable in the dataset.
+
+We use this data to build a model that will then be used to make predictions of whether or not an excercise was performed correctly based on the various measurements.
+
+Recognition goes to the researchers that make this data publicly available:
+
+Ugulino, W.; Cardador, D.; Vega, K.; Velloso, E.; Milidiu, R.; Fuks, H. Wearable Computing: Accelerometers' Data Classification of Body Postures and Movements. Proceedings of 21st Brazilian Symposium on Artificial Intelligence. Advances in Artificial Intelligence - SBIA 2012. In: Lecture Notes in Computer Science. , pp. 52-61. Curitiba, PR: Springer Berlin / Heidelberg, 2012. ISBN 978-3-642-34458-9. DOI: 10.1007/978-3-642-34459-6_6
+
+Read more: http://groupware.les.inf.puc-rio.br/har#sbia_paper_section#ixzz4OVyHB3W4
+
+
+```{r libraries, echo=TRUE, message=FALSE, warning=FALSE}
+library(caret)
+library(randomForest)
+library(rpart)
+library(gbm)
+library(survival)
+library(splines)
+library(parallel)
+library(plyr)
+
+```
+
+# Data processing
+
+The data comes already split into training and test sets. We decided to take the complete training set and split it into a training and test set to allow us to build and test a model within the supplied training set. We split the complete training set 75%/25% into training and test sets for us to train our model.
+
+With our available hardware we found it impossible to process the data as-is with the large nubmer of variables so we first removed variables that had near-zero variance. We also removed the timestamp variables and the record number (x) as they have no bearing on the test outcome and can confuse our models.
+
+
+```{r prepdata, echo=FALSE, warning=FALSE}
+
+train_csv = "pml-training.csv"
+test_csv = "pml-testing.csv"
+set.seed(3921837)
+
+all_training <- read.csv(train_csv)
+final_testing <- read.csv(test_csv)
+
+all_training[is.na(all_training)] <- 0
+
+inTrain <- createDataPartition(y=all_training$classe,
+                               p=0.75, list=FALSE)
+
+training <- all_training[inTrain,]
+testing <- all_training[-inTrain,]
+
+nzv_cols <- nearZeroVar(training)
+training_trim <- training[, -nzv_cols]
+training_trim <- subset(training_trim, select=-c(cvtd_timestamp, raw_timestamp_part_1, raw_timestamp_part_2, num_window))
+training_trim <- training_trim[, -1]
+
+
+x <- training_trim[sample(nrow(training_trim), 1000),]
+#x <- training_trim
+#x <- subset(x, select=-c(cvtd_timestamp))
+
+```
+
+We explored several model (tree, gradient boosting, and random forest) on a small sample (1000) of the training data to get an idea of the accuracy we could expect without putting too much computational burden on our hardware. We found that random forest showed the best performance at greater than 90% accuracy. For our random forest model we used k-fold cross validation with 5 folds as larger numbers of folds created to much load for our hardware. K-fold cross validation seemed like a valid option given we have a reasonably large set of training data (approximately 14,000 records) which should keep variance low.
+
+```{r explore, echo=TRUE, warning=FALSE}
+
+modTreeBoot5 <- train(classe ~., method="rpart", data=x, trControl=trainControl(method = "boot", number = 5))
+max(modTreeBoot5$results[,"Accuracy"])
+
+modTreeCv5 <- train(classe ~., method="rpart", data=x, trControl=trainControl(method = "cv", number = 5))
+max(modTreeCv5$results[,"Accuracy"])
+
+modGbmBoot5 <- train(classe ~., method="gbm", data=x, verbose=FALSE,
+                    trControl=trainControl(method = "boot", number = 5))
+max(modGbmBoot5$results[,"Accuracy"])
+
+modForestCv5 <- train(classe ~., method="rf", data=x, verbose=FALSE,
+                      trControl=trainControl(method = "cv", number = 5))
+max(modForestCv5$results[,"Accuracy"])
+cm_modForestCv5 <- confusionMatrix(testing$classe, predict(modForestCv5, testing))
+cm_modForestCv5
+
+
+```
+
+# Final Model
+
+We then built our final random forest model on the training set. We used k-fold cross validation with 2 folds as we found any greater number of folds was too demanding for the hardware at our disposal when we used the full training set. Our in-sample accuracy remained greater than 90%.
+
+After building the model we used it to predict the classe variable in our testing data set. We show the confusion matrix below, which shows our predicted out of sample accuracy. We also show a plot of the importance of the top 10 variables. 
+
+
+
+```{r model, echo=TRUE, warning=FALSE}
+
+modFit <- train(classe ~., method="rf", data=training_trim, verbose=FALSE,
+                      trControl=trainControl(method = "cv", number = 2))
+
+max(modFit$results[,"Accuracy"])
+cm_modFit <- confusionMatrix(testing$classe, predict(modFit, testing))
+cm_modFit
+vi_modFit <- varImp(modFit)
+#vi_modFit
+vi_df <-data.frame(rownames(vi_modFit[1]$importance), vi_modFit[1][1]$importance$Overall)
+colnames(vi_df) <- c("variable", "importance")
+ggplot(vi_df[1:10,], aes(x=reorder(variable, importance), y=importance)) + geom_bar(stat="identity") + coord_flip() + xlab("variable")
+
+
+```
+
+Our final model showed an estimated out of sample accuracy of 99%. Given this acceptable accuracy we will proceed to use this model on the final 20-sample testing set.
+
+
